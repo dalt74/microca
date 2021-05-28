@@ -9,7 +9,7 @@ tsa_policy2 = 1.2.3.4.5.6
 tsa_policy3 = 1.2.3.4.5.7
 
 [ ca ]
-default_ca	= CA_default		# The default ca section
+default_ca	= CA_default
 
 [ CA_default ]
 dir         = $ENV::CONF_DIR/ca_dir
@@ -38,21 +38,21 @@ preserve	= no
 policy		= policy_match
 
 [ policy_match ]
-countryName		= optional
-stateOrProvinceName	= optional
-organizationName	= optional
-organizationalUnitName	= optional
-commonName		= supplied
-emailAddress		= optional
+countryName             = optional
+stateOrProvinceName     = optional
+organizationName        = optional
+organizationalUnitName  = optional
+commonName	            = supplied
+emailAddress		    = optional
 
 [ policy_anything ]
-countryName		= optional
-stateOrProvinceName	= optional
-localityName		= optional
-organizationName	= optional
+countryName		        = optional
+stateOrProvinceName	    = optional
+localityName		    = optional
+organizationName	    = optional
 organizationalUnitName	= optional
-commonName		= supplied
-emailAddress		= optional
+commonName		        = supplied
+emailAddress		    = optional
 
 [ req ]
 default_bits		= $ENV::REQ_BITS

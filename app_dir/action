@@ -1,15 +1,40 @@
 #!/bin/bash
 
 function fatal() {
+    echo 1>&2
     echo "$@" 1>&2
+    echo 1>&2
     exit 1
 }
 
-if [ -e config ] ; then . config ; fi
+if [ "$WORK_DIR" = "" ] ; then WORK_DIR="$(pwd)"; fi
 
-if [ "$BASE_DIR" = "" ] ; then BASE_DIR="$(dirname $0)" ; fi
-if [ "$BASE_DIR" = "" ] ; then BASE_DIR="$(which $0)" ; fi
-if [ "$BASE_DIR" = "" ] ; then abort "Unable to detect base dir" ; fi
+if [ "$1" = "prepare" ] ; then
+    if [ -e "$WORK_DIR/.config" -o -e "$WORK_DIR/.openssl.cnf" ] ; then
+        fatal "Workspace $WORK_DIR already prepared"
+    elif [ ! -d "$WORK_DIR" ] ; then
+        fatal "Workspace $WORK_DIR not found"
+    fi
+    if [ "$BASE_DIR" = "" ] ; then BASE_DIR="$(dirname $0)" ; fi
+    if [ "$BASE_DIR" = "" ] ; then BASE_DIR="$(dirname $(which $0))" ; fi
+    if [ "$BASE_DIR" = "" ] ; then fatal "Unable to detect base dir" ; fi
+    cp "$BASE_DIR/config" "$WORK_DIR/.config" && \
+        cp "$BASE_DIR/openssl.cnf" "$WORK_DIR/.openssl.cnf"
+    if [ ! -e "$WORK_DIR/.openssl.cnf" ] ; then
+        fatal "Initialization failed"
+    fi
+    echo
+    echo Success initialization
+    echo
+    exit 0
+fi
+
+if [ -e "$WORK_DIR/.config" ] ; then
+    . "$WORK_DIR/.config"
+    export OPENSSL_CONF="$WORK_DIR/.openssl.cnf"
+else
+    fatal "Workspace $WORK_DIR not prepared"
+fi
 
 if [ "$CONF_DIR" = "" ] ; then CONF_DIR=$(pwd); fi
 if [ "$REQ_COUNTRY" = "" ] ; then REQ_COUNTRY=$DEFAULT_CONF_COUNTRY; fi
@@ -22,15 +47,13 @@ if [ "$REQ_BITS" = "" ] ; then REQ_BITS=$DEFAULT_CONF_BITS; fi
 
 export CONF_DIR CONF_CERT_DAYS CONF_CRL_DAYS REQ_COUNTRY REQ_PROVINCE REQ_LOCALITY REQ_ORG REQ_OU REQ_CN REQ_BITS
 
-export OPENSSL_CONF="$BASE_DIR/openssl.cnf"
-
 if [ "$1" = "init" ] ; then
     if [ -e "$CONF_DIR/ca_dir/cacert.pem" -o \
          -e "$CONF_DIR/ca_dir/cacert.pem" -o \
          -e "$CONF_DIR/ca_dir/serial" -o \
          -e "$CONF_DIR/ca_dir/index" \
     ] ; then
-        fatal "CA data exists"
+        fatal "CA already exists"
     fi
     [ ! -d "$CONF_DIR/ca_dir" ] && mkdir "$CONF_DIR/ca_dir"
     REQ_CN=mcaCAroot
@@ -39,17 +62,18 @@ if [ "$1" = "init" ] ; then
     openssl req -nodes -new -x509 -keyout $CONF_DIR/ca_dir/cacert.key -out $CONF_DIR/ca_dir/cacert.pem && \
         echo 00 > $CONF_DIR/ca_dir/index.txt && \
         echo 'unique_subject = yes' > $CONF_DIR/ca_dir/index.txt.attr
-    [ -f "$CONF_DIR/ca_dir/index.txt.attr" ] || abort "Operation failed"
+    [ -f "$CONF_DIR/ca_dir/index.txt.attr" ] || fatal "Operation failed"
     echo
     echo "Initialization success"
     exit 0
 elif [ "$1" = "crl" ] ; then
-    [ ! -e "$CONF_DIR/ca_dir/index.txt" ] && abort "Not initialized"
+    [ ! -e "$CONF_DIR/ca_dir/index.txt" ] && fatal "Not initialized"
     export REQ_CN=""
     openssl ca -gencrl -crldays 3650 -out crl.pem
 else
     echo "Usage:"
-    echo "$0 init  -- initialize CA"
-    echo "$0 crl   -- generate CRL"
-    fatal "Abort"
+    echo "$0 prepare  -- prepare CA workspace"
+    echo "$0 init     -- initialize CA"
+    echo "$0 crl      -- generate CRL"
+    fatal "Exiting"
 fi
