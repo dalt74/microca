@@ -1,0 +1,55 @@
+#!/bin/bash
+
+function fatal() {
+    echo "$@" 1>&2
+    exit 1
+}
+
+if [ -e config ] ; then . config ; fi
+
+if [ "$BASE_DIR" = "" ] ; then BASE_DIR="$(dirname $0)" ; fi
+if [ "$BASE_DIR" = "" ] ; then BASE_DIR="$(which $0)" ; fi
+if [ "$BASE_DIR" = "" ] ; then abort "Unable to detect base dir" ; fi
+
+if [ "$CONF_DIR" = "" ] ; then CONF_DIR=$(pwd); fi
+if [ "$REQ_COUNTRY" = "" ] ; then REQ_COUNTRY=$DEFAULT_CONF_COUNTRY; fi
+if [ "$REQ_LOCALITY" = "" ] ; then REQ_LOCALITY=$DEFAULT_CONF_LOCALITY; fi
+if [ "$REQ_PROVINCE" = "" ] ; then REQ_PROVINCE=$DEFAULT_CONF_PROVINCE; fi
+if [ "$REQ_ORG" = "" ] ; then REQ_ORG=$DEFAULT_CONF_ORG; fi
+if [ "$REQ_OU" = "" ] ; then REQ_OU=$DEFAULT_CONF_OU; fi
+if [ "$CONF_CERT_DAYS" = "" ] ; then CONF_CERT_DAYS=$DEFAULT_CONF_CERT_DAYS; fi
+if [ "$REQ_BITS" = "" ] ; then REQ_BITS=$DEFAULT_CONF_BITS; fi
+
+export CONF_DIR CONF_CERT_DAYS CONF_CRL_DAYS REQ_COUNTRY REQ_PROVINCE REQ_LOCALITY REQ_ORG REQ_OU REQ_CN REQ_BITS
+
+export OPENSSL_CONF="$BASE_DIR/openssl.cnf"
+
+if [ "$1" = "init" ] ; then
+    if [ -e "$CONF_DIR/ca_dir/cacert.pem" -o \
+         -e "$CONF_DIR/ca_dir/cacert.pem" -o \
+         -e "$CONF_DIR/ca_dir/serial" -o \
+         -e "$CONF_DIR/ca_dir/index" \
+    ] ; then
+        fatal "CA data exists"
+    fi
+    [ ! -d "$CONF_DIR/ca_dir" ] && mkdir "$CONF_DIR/ca_dir"
+    REQ_CN=mcaCAroot
+    export REQ_CN
+    bash -c set | grep "^CONF\|^REQ"
+    openssl req -nodes -new -x509 -keyout $CONF_DIR/ca_dir/cacert.key -out $CONF_DIR/ca_dir/cacert.pem && \
+        echo 00 > $CONF_DIR/ca_dir/index.txt && \
+        echo 'unique_subject = yes' > $CONF_DIR/ca_dir/index.txt.attr
+    [ -f "$CONF_DIR/ca_dir/index.txt.attr" ] || abort "Operation failed"
+    echo
+    echo "Initialization success"
+    exit 0
+elif [ "$1" = "crl" ] ; then
+    [ ! -e "$CONF_DIR/ca_dir/index.txt" ] && abort "Not initialized"
+    export REQ_CN=""
+    openssl ca -gencrl -crldays 3650 -out crl.pem
+else
+    echo "Usage:"
+    echo "$0 init  -- initialize CA"
+    echo "$0 crl   -- generate CRL"
+    fatal "Abort"
+fi
