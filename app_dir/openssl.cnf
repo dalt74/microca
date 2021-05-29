@@ -30,7 +30,7 @@ x509_extensions	= usr_cert
 name_opt 	= ca_default
 cert_opt 	= ca_default
 
-default_days	= $ENV::CONF_CERT_DAYS
+default_days	= $ENV::REQ_CERT_DAYS
 default_crl_days= $ENV::CONF_CRL_DAYS
 default_md	= default
 preserve	= no

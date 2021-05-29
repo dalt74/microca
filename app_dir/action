@@ -7,6 +7,9 @@ function fatal() {
     exit 1
 }
 
+LIBRESSL=no
+openssl version | grep -q ^LibreSSL && LIBRESSL=yes
+
 if [ "$WORK_DIR" = "" ] ; then WORK_DIR="$(pwd)"; fi
 
 if [ "$1" = "prepare" ] ; then
@@ -42,10 +45,34 @@ if [ "$REQ_LOCALITY" = "" ] ; then REQ_LOCALITY=$DEFAULT_CONF_LOCALITY; fi
 if [ "$REQ_PROVINCE" = "" ] ; then REQ_PROVINCE=$DEFAULT_CONF_PROVINCE; fi
 if [ "$REQ_ORG" = "" ] ; then REQ_ORG=$DEFAULT_CONF_ORG; fi
 if [ "$REQ_OU" = "" ] ; then REQ_OU=$DEFAULT_CONF_OU; fi
-if [ "$CONF_CERT_DAYS" = "" ] ; then CONF_CERT_DAYS=$DEFAULT_CONF_CERT_DAYS; fi
 if [ "$REQ_BITS" = "" ] ; then REQ_BITS=$DEFAULT_CONF_BITS; fi
+if [ "$REQ_CERT_DAYS" = "" ] ; then REQ_CERT_DAYS=$CONF_CERT_DAYS; fi
 
-export CONF_DIR CONF_CERT_DAYS CONF_CRL_DAYS REQ_COUNTRY REQ_PROVINCE REQ_LOCALITY REQ_ORG REQ_OU REQ_CN REQ_BITS
+export CONF_DIR REQ_CERT_DAYS CONF_CRL_DAYS REQ_COUNTRY REQ_PROVINCE REQ_LOCALITY REQ_ORG REQ_OU REQ_CN REQ_BITS
+
+function _openssl() {
+    BASE_OPENSSL_CONF="$OPENSSL_CONF"
+    if [ "$LIBRESSL" = "yes" ] ; then
+        content="$(cat "$OPENSSL_CONF")"
+        for n in CONF_DIR CONF_CRL_DAYS \
+                 REQ_CERT_DAYS REQ_COUNTRY REQ_PROVINCE \
+                 REQ_LOCALITY REQ_ORG REQ_OU REQ_CN REQ_BITS
+        do
+            sval='$ENV::'$n
+            dval="$(echo ${!n} | tr / ^)"
+            content="$(echo "$content" | sed -e "s/$sval/$dval/g")"
+        done
+        export OPENSSL_CONF=".tmp.pid-$$.openssl.cnf"
+        echo "$content" | tr "^" "/" > "$OPENSSL_CONF"
+    fi
+    if openssl $@ ; then
+        [ "$OPENSSL_CONF" != "$BASE_OPENSSL_CONF" ] && rm -f "$OPENSSL_CONF"
+        return 0
+    else
+        [ "$OPENSSL_CONF" != "$BASE_OPENSSL_CONF" ] && rm -f "$OPENSSL_CONF"
+        return 1
+    fi
+}
 
 if [ "$1" = "init" ] ; then
     if [ -e "$CONF_DIR/ca_dir/cacert.pem" -o \
@@ -58,10 +85,12 @@ if [ "$1" = "init" ] ; then
     [ ! -d "$CONF_DIR/ca_dir" ] && mkdir "$CONF_DIR/ca_dir"
     REQ_CN=mcaCAroot
     export REQ_CN
-    bash -c set | grep "^CONF\|^REQ"
-    openssl req -nodes -new -x509 -keyout $CONF_DIR/ca_dir/cacert.key -out $CONF_DIR/ca_dir/cacert.pem && \
+    _openssl req -nodes -new -x509 -days $REQ_CERT_DAYS \
+                 -keyout $CONF_DIR/ca_dir/cacert.key \
+                 -out $CONF_DIR/ca_dir/cacert.pem && \
         echo 00 > $CONF_DIR/ca_dir/index.txt && \
         echo 'unique_subject = yes' > $CONF_DIR/ca_dir/index.txt.attr
+    [ "$OPENSSL_CONF" != "$BASE_OPENSSL_CONF" ] && rm -f "$OPENSSL_CONF"
     [ -f "$CONF_DIR/ca_dir/index.txt.attr" ] || fatal "Operation failed"
     echo
     echo "Initialization success"
@@ -69,7 +98,8 @@ if [ "$1" = "init" ] ; then
 elif [ "$1" = "crl" ] ; then
     [ ! -e "$CONF_DIR/ca_dir/index.txt" ] && fatal "Not initialized"
     export REQ_CN=""
-    openssl ca -gencrl -crldays 3650 -out crl.pem
+    _openssl ca -gencrl -crldays 3650 -out crl.pem
+    [ "$OPENSSL_CONF" != "$BASE_OPENSSL_CONF" ] && rm -f "$OPENSSL_CONF"
 else
     echo "Usage:"
     echo "$0 prepare  -- prepare CA workspace"
