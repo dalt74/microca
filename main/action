@@ -10,20 +10,21 @@ function fatal() {
 LIBRESSL=no
 openssl version | grep -q ^LibreSSL && LIBRESSL=yes
 
-if [ "$WORK_DIR" = "" ] ; then WORK_DIR="$(pwd)"; fi
+now="$(date +%Y%m%d-%H%M%S)"
+if [ "$CONF_DIR" = "" ] ; then CONF_DIR="$(pwd)"; fi
 
 if [ "$1" = "prepare" ] ; then
-    if [ -e "$WORK_DIR/.config" -o -e "$WORK_DIR/.openssl.cnf" ] ; then
-        fatal "Workspace $WORK_DIR already prepared"
-    elif [ ! -d "$WORK_DIR" ] ; then
-        fatal "Workspace $WORK_DIR not found"
+    if [ -e "$CONF_DIR/.config" -o -e "$CONF_DIR/.openssl.cnf" ] ; then
+        fatal "Workspace $CONF_DIR already prepared"
+    elif [ ! -d "$CONF_DIR" ] ; then
+        fatal "Workspace $CONF_DIR not found"
     fi
     if [ "$BASE_DIR" = "" ] ; then BASE_DIR="$(dirname $0)" ; fi
     if [ "$BASE_DIR" = "" ] ; then BASE_DIR="$(dirname $(which $0))" ; fi
     if [ "$BASE_DIR" = "" ] ; then fatal "Unable to detect base dir" ; fi
-    cp "$BASE_DIR/config" "$WORK_DIR/.config" && \
-        cp "$BASE_DIR/openssl.cnf" "$WORK_DIR/.openssl.cnf"
-    if [ ! -e "$WORK_DIR/.openssl.cnf" ] ; then
+    cp "$BASE_DIR/config" "$CONF_DIR/.config" && \
+        cp "$BASE_DIR/openssl.cnf" "$CONF_DIR/.openssl.cnf"
+    if [ ! -e "$CONF_DIR/.openssl.cnf" ] ; then
         fatal "Initialization failed"
     fi
     echo
@@ -32,11 +33,11 @@ if [ "$1" = "prepare" ] ; then
     exit 0
 fi
 
-if [ -e "$WORK_DIR/.config" ] ; then
-    . "$WORK_DIR/.config"
-    export OPENSSL_CONF="$WORK_DIR/.openssl.cnf"
+if [ -e "$CONF_DIR/.config" ] ; then
+    . "$CONF_DIR/.config"
+    export OPENSSL_CONF="$CONF_DIR/.openssl.cnf"
 else
-    fatal "Workspace $WORK_DIR not prepared"
+    fatal "Workspace $CONF_DIR not prepared"
 fi
 
 if [ "$CONF_DIR" = "" ] ; then CONF_DIR=$(pwd); fi
@@ -47,8 +48,11 @@ if [ "$REQ_ORG" = "" ] ; then REQ_ORG=$DEFAULT_CONF_ORG; fi
 if [ "$REQ_OU" = "" ] ; then REQ_OU=$DEFAULT_CONF_OU; fi
 if [ "$REQ_BITS" = "" ] ; then REQ_BITS=$DEFAULT_CONF_BITS; fi
 if [ "$REQ_CERT_DAYS" = "" ] ; then REQ_CERT_DAYS=$CONF_CERT_DAYS; fi
+REQ_CN=""
+REQ_EMAIL=""
 
-export CONF_DIR REQ_CERT_DAYS CONF_CRL_DAYS REQ_COUNTRY REQ_PROVINCE REQ_LOCALITY REQ_ORG REQ_OU REQ_CN REQ_BITS
+export CONF_DIR CONF_CRL_DAYS
+export REQ_CERT_DAYS REQ_COUNTRY REQ_PROVINCE REQ_LOCALITY REQ_ORG REQ_OU REQ_CN REQ_BITS REQ_EMAIL
 
 function _openssl() {
     BASE_OPENSSL_CONF="$OPENSSL_CONF"
@@ -56,13 +60,13 @@ function _openssl() {
         content="$(cat "$OPENSSL_CONF")"
         for n in CONF_DIR CONF_CRL_DAYS \
                  REQ_CERT_DAYS REQ_COUNTRY REQ_PROVINCE \
-                 REQ_LOCALITY REQ_ORG REQ_OU REQ_CN REQ_BITS
+                 REQ_LOCALITY REQ_ORG REQ_OU REQ_CN REQ_BITS REQ_EMAIL
         do
             sval='$ENV::'$n
             dval="$(echo ${!n} | tr / ^)"
             content="$(echo "$content" | sed -e "s/$sval/$dval/g")"
         done
-        export OPENSSL_CONF=".tmp.pid-$$.openssl.cnf"
+        export OPENSSL_CONF="$CONF_DIR/.tmp.pid-$$.openssl.cnf"
         echo "$content" | tr "^" "/" > "$OPENSSL_CONF"
     fi
     if openssl $@ ; then
@@ -83,27 +87,71 @@ if [ "$1" = "init" ] ; then
         fatal "CA already exists"
     fi
     [ ! -d "$CONF_DIR/ca_dir" ] && mkdir "$CONF_DIR/ca_dir"
-    REQ_CN=mcaCAroot
+    [ "$REQ_CN" = "" ] && REQ_CN=mcaCAroot
+    [ "$REQ_EMAIL" = "" ] && REQ_EMAIL=root@localhost
     export REQ_CN
     _openssl req -nodes -new -x509 -days $REQ_CERT_DAYS \
                  -keyout $CONF_DIR/ca_dir/cacert.key \
-                 -out $CONF_DIR/ca_dir/cacert.pem && \
-        echo 00 > $CONF_DIR/ca_dir/index.txt && \
-        echo 'unique_subject = yes' > $CONF_DIR/ca_dir/index.txt.attr
-    [ "$OPENSSL_CONF" != "$BASE_OPENSSL_CONF" ] && rm -f "$OPENSSL_CONF"
+                 -out $CONF_DIR/ca_dir/cacert.pem \
+        && touch $CONF_DIR/ca_dir/index.txt \
+        && echo 01 > $CONF_DIR/ca_dir/serial \
+        && echo 01 > $CONF_DIR/ca_dir/crlnumber \
+        && echo 'unique_subject = yes' > $CONF_DIR/ca_dir/index.txt.attr \
+        && mkdir $CONF_DIR/ca_dir/newcerts \
+        && mkdir $CONF_DIR/requests \
+        && mkdir $CONF_DIR/certificates
     [ -f "$CONF_DIR/ca_dir/index.txt.attr" ] || fatal "Operation failed"
     echo
     echo "Initialization success"
+    echo
     exit 0
 elif [ "$1" = "crl" ] ; then
     [ ! -e "$CONF_DIR/ca_dir/index.txt" ] && fatal "Not initialized"
-    export REQ_CN=""
-    _openssl ca -gencrl -crldays 3650 -out crl.pem
-    [ "$OPENSSL_CONF" != "$BASE_OPENSSL_CONF" ] && rm -f "$OPENSSL_CONF"
+    _openssl ca -gencrl -crldays $CONF_CRL_DAYS -out crl.pem || fatal "Failed"
+    echo
+    echo "CRL had been created"
+    echo
+    exit 0
+elif [ "$1" = "req" ] ; then
+    export REQ_CN="$2"
+    export REQ_EMAIL="$3"
+    [ "$REQ_CN" == "" ] && fatal "CN is required"
+    _openssl req -nodes -new -days $REQ_CERT_DAYS \
+                 -keyout $CONF_DIR/requests/"$REQ_CN-$now.key" \
+                 -out $CONF_DIR/requests/"$REQ_CN-$now.csr" || fatal "Create request failed"
+    echo
+    echo "Request had been created"
+    echo
+    exit 0
+elif [ "$1" = "sign" ] ; then
+    CSR_FILE="$2"
+    CERT_FILE="$(echo "$(basename "$CSR_FILE")" | sed -e 's/.csr$//g')"
+    SIGN_DAYS="$CONF_CERT_DAYS"
+    [ "$3" != "" ] && SIGN_DAYS="$3"
+    [ ! -e "$CSR_FILE" ] && fatal "File '$CSR_FILE' not found"
+    [ ! -e "$CONF_DIR/ca_dir/index.txt" ] && fatal "Not initialized"
+    _openssl ca -in "$CSR_FILE" -days "$SIGN_DAYS" -out $CONF_DIR/certificates/"$CERT_FILE.pem" || fatal "Sign CSR failed"
+    echo
+    echo "Request signed, cert created"
+    echo
+    exit 0
+elif [ "$1" = "revoke" ] ; then
+    CERT_FILE="$2"
+    [ "$3" != "" ] && SIGN_DAYS="$3"
+    [ ! -e "$CERT_FILE" ] && fatal "File '$CERT_FILE' not found"
+    [ ! -e "$CONF_DIR/ca_dir/index.txt" ] && fatal "Not initialized"
+    _openssl ca -revoke "$CERT_FILE" || fatal "Revoke cert failed"
+    echo
+    echo "Certificate revoked, rebuild CRL required"
+    echo
+    exit 0
 else
     echo "Usage:"
-    echo "$0 prepare  -- prepare CA workspace"
-    echo "$0 init     -- initialize CA"
-    echo "$0 crl      -- generate CRL"
+    echo "$0 prepare                     -- prepare CA workspace"
+    echo "$0 init                        -- initialize CA"
+    echo "$0 crl                         -- generate CRL"
+    echo "$0 req <cn> [ <email> ]        -- generate request"
+    echo "$0 sign <csr_file> [ <days> ]  -- sign request"
+    echo "$0 revoke <cert_file>          -- revoke cert"
     fatal "Exiting"
 fi
