@@ -8,9 +8,9 @@ Simple script to perform basic CA tasks
    # ../main/action prepare
 
    This will create:
-   * openssl configuration - <path>/.openssl.cnf
-   * MicroCA configuration - <path>/.config
-   * openssl-compliant CA database - <path>/ca_dir/*
+   * openssl configuration - <conf_dir>/.openssl.cnf
+   * MicroCA configuration - <conf_dir>/.config
+   * openssl-compliant CA database - <conf_dir>/ca_dir/*
 
 3. Change config ot configure your defaults
    Set CRL/cert lifetimes and default DN component values
@@ -27,6 +27,8 @@ Simple script to perform basic CA tasks
    
    or sign for 37 days
    # ../main/action sign requests/username-*.csr 37
+
+   The new certificate will be copied into <conf_dir>/certificates folder
 
 7. Revoke cert
    # ../main/action revoke certificates/username-*.crt
