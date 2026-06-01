@@ -10,7 +10,6 @@ function fatal() {
 LIBRESSL=no
 openssl version | grep -q ^LibreSSL && LIBRESSL=yes
 
-now="$(date +%Y%m%d-%H%M%S)"
 if [ "$CONF_DIR" = "" ] ; then CONF_DIR="$(pwd)"; fi
 
 if [ "$1" = "prepare" ] ; then
@@ -115,10 +114,14 @@ elif [ "$1" = "crl" ] ; then
 elif [ "$1" = "req" ] ; then
     export REQ_CN="$2"
     export REQ_EMAIL="$3"
+    if [ -f "$CONF_DIR/requests/$REQ_CN.key" ] ; then
+        echo "Key file for requests/$$REQ_CN.key exists"
+        exit 1
+    fi
     [ "$REQ_CN" == "" ] && fatal "CN is required"
     _openssl req -nodes -new -days $REQ_CERT_DAYS \
-                 -keyout $CONF_DIR/requests/"$REQ_CN-$now.key" \
-                 -out $CONF_DIR/requests/"$REQ_CN-$now.csr" || fatal "Create request failed"
+                 -keyout $CONF_DIR/requests/"$REQ_CN.key" \
+                 -out $CONF_DIR/requests/"$REQ_CN.csr" || fatal "Create request failed"
     echo
     echo "Request had been created"
     echo
@@ -130,7 +133,17 @@ elif [ "$1" = "sign" ] ; then
     [ "$3" != "" ] && SIGN_DAYS="$3"
     [ ! -e "$CSR_FILE" ] && fatal "File '$CSR_FILE' not found"
     [ ! -e "$CONF_DIR/ca_dir/index.txt" ] && fatal "Not initialized"
-    _openssl ca -in "$CSR_FILE" -days "$SIGN_DAYS" -out $CONF_DIR/certificates/"$CERT_FILE.pem" || fatal "Sign CSR failed"
+    EXTFILE="/tmp/$$-san"
+    if [ "$SAN_VALUE" != "" ] ; then
+        echo "subjectAltName=$SAN_VALUE" >$EXTFILE
+        echo "basicConstraints = CA:FALSE" >>$EXTFILE
+        echo "nsComment = \"OpenSSL Generated Certificate\"" >>$EXTFILE
+        echo "subjectKeyIdentifier = hash" >>$EXTFILE
+        echo "authorityKeyIdentifier = keyid,issuer" >>$EXTFILE
+        SANOPTS="-extfile $EXTFILE"
+    fi
+    _openssl ca -in "$CSR_FILE" -days "$SIGN_DAYS" $SANOPTS -out $CONF_DIR/certificates/"$CERT_FILE.pem" || { rm -f $EXTFILE ; fatal "Sign CSR failed" ; }
+    rm -f "$EXTFILE"
     echo
     echo "Request signed, cert created"
     echo
