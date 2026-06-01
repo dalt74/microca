@@ -1,4 +1,6 @@
 ca_dir/
+requests/
+certificates/
 .openssl*
 .config
 
