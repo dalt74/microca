@@ -127,8 +127,22 @@ elif [ "$1" = "req" ] ; then
     echo
     exit 0
 elif [ "$1" = "sign" ] ; then
-    CSR_FILE="$2"
-    CERT_FILE="$(echo "$(basename "$CSR_FILE")" | sed -e 's/.csr$//g')"
+    CERT_BASENAME="$2"
+    if [ -f "requests/$2.csr" ] ; then
+        CSR_FILE="requests/$2.csr"
+        CERT_BASENAME="$2"
+    else
+        CERT_BASENAME="$(echo "$(basename "$CSR_FILE")" | sed -e 's/.csr$//g')"
+    fi
+    CERT_FILE="$CONF_DIR/certificates/$CERT_BASENAME.pem"
+    SUGGESTED_KEY_FILE="$CONF_DIR/requests/$CERT_BASENAME.key"
+
+    OUT_BUNDLE_FILE="$CONF_DIR/output/$CERT_BASENAME-pack.pack"
+    OUT_CERT_FILE="$CONF_DIR/output/$CERT_BASENAME.pem"
+    OUT_KEY_FILE="$CONF_DIR/output/$CERT_BASENAME.key"
+
+    echo "Request file: $CSR_FILE"
+
     SIGN_DAYS="$CONF_CERT_DAYS"
     [ "$3" != "" ] && SIGN_DAYS="$3"
     [ ! -e "$CSR_FILE" ] && fatal "File '$CSR_FILE' not found"
@@ -142,11 +156,23 @@ elif [ "$1" = "sign" ] ; then
         echo "authorityKeyIdentifier = keyid,issuer" >>$EXTFILE
         SANOPTS="-extfile $EXTFILE"
     fi
-    _openssl ca -in "$CSR_FILE" -days "$SIGN_DAYS" $SANOPTS -out $CONF_DIR/certificates/"$CERT_FILE.pem" || { rm -f $EXTFILE ; fatal "Sign CSR failed" ; }
+    mkdir -p "$CONF_DIR/output"
+    _openssl ca -in "$CSR_FILE" -days "$SIGN_DAYS" $SANOPTS -out "$CERT_FILE" || { rm -f $EXTFILE ; fatal "Sign CSR failed" ; }
     rm -f "$EXTFILE"
-    echo
     echo "Request signed, cert created"
-    echo
+
+    if cp "$CERT_FILE" "$OUT_CERT_FILE" ; then
+        echo "Output cert: $OUT_CERT_FILE"
+    fi
+    if [ -f "$SUGGESTED_KEY_FILE" ] ; then
+        if cp "$SUGGESTED_KEY_FILE" "$OUT_KEY_FILE" ; then
+            echo "Output key: $OUT_KEY_FILE"
+            echo "Output bundler: $OUT_BUNDLE_FILE"
+            cat "$CERT_FILE" "$SUGGESTED_KEY_FILE" > "$OUT_BUNDLE_FILE"
+        fi
+    else
+        echo "Key file not available"
+    fi
     exit 0
 elif [ "$1" = "revoke" ] ; then
     CERT_FILE="$2"
@@ -164,7 +190,7 @@ else
     echo "$0 init                        -- initialize CA"
     echo "$0 crl                         -- generate CRL"
     echo "$0 req <cn> [ <email> ]        -- generate request"
-    echo "$0 sign <csr_file> [ <days> ]  -- sign request"
+    echo "$0 sign <cn_or_csr_file> [ <days> ]  -- sign request"
     echo "$0 revoke <cert_file>          -- revoke cert"
     fatal "Exiting"
 fi
